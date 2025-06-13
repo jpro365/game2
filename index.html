@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>뿌요뿌요</title>
+  <style>
+    body {
+      background: #222;
+      color: #fff;
+      font-family: sans-serif;
+      text-align: center;
+    }
+    canvas {
+      background: #000;
+      display: block;
+      margin: 20px auto;
+    }
+    #score {
+      font-size: 20px;
+    }
+    #controls {
+      margin-top: 10px;
+      font-size: 14px;
+      color: #ccc;
+    }
+    #gameOver {
+      display: none;
+      font-size: 24px;
+      color: red;
+      margin-top: 10px;
+    }
+    button {
+      padding: 10px 20px;
+      font-size: 16px;
+    }
+  </style>
+</head>
+<body>
+  <h1>뿌요뿌요</h1>
+  <canvas id="game" width="240" height="480"></canvas>
+  <div id="score">점수: 0</div>
+  <div id="controls">
+    조작법: ← → 이동, ↑ 회전, ↓ 빠르게, Space 즉시 낙하
+  </div>
+  <div id="gameOver">
+    게임 오버! <br />
+    <button onclick="restart()">다시 시작</button>
+  </div>
+  <script>
+    const COLS = 6;
+    const ROWS = 12;
+    const SIZE = 40;
+    const COLORS = ["red", "blue", "yellow", "green"];
+    const canvas = document.getElementById("game");
+    const ctx = canvas.getContext("2d");
+    let field = [];
+    let current = null;
+    let next = null;
+    let score = 0;
+    let gameOver = false;
+
+    function createField() {
+      field = Array.from({ length: ROWS }, () =>
+        Array.from({ length: COLS }, () => null)
+      );
+    }
+
+    function drawField() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      for (let y = 0; y < ROWS; y++) {
+        for (let x = 0; x < COLS; x++) {
+          if (field[y][x]) drawPuyo(x, y, field[y][x]);
+          ctx.strokeStyle = "#444";
+          ctx.strokeRect(x * SIZE, y * SIZE, SIZE, SIZE);
+        }
+      }
+      if (current) drawCurrent();
+    }
+
+    function drawPuyo(x, y, color) {
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(x * SIZE + SIZE / 2, y * SIZE + SIZE / 2, SIZE / 2 - 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    function newPuyo() {
+      current = {
+        x: 2,
+        y: 0,
+        pair: [randColor(), randColor()],
+        rotation: 0,
+      };
+      if (collides(current.x, current.y, current.pair)) {
+        document.getElementById("gameOver").style.display = "block";
+        gameOver = true;
+        return;
+      }
+    }
+
+    function randColor() {
+      return COLORS[Math.floor(Math.random() * COLORS.length)];
+    }
+
+    function drawCurrent() {
+      const [c1, c2] = current.pair;
+      const [x1, y1] = [current.x, current.y];
+      const [x2, y2] = getRotatedOffset(current.rotation, x1, y1);
+      drawPuyo(x1, y1, c1);
+      drawPuyo(x2, y2, c2);
+    }
+
+    function getRotatedOffset(rot, x, y) {
+      switch (rot % 4) {
+        case 0: return [x, y + 1];
+        case 1: return [x + 1, y];
+        case 2: return [x, y - 1];
+        case 3: return [x - 1, y];
+      }
+    }
+
+    function collides(x, y, pair, rot = current.rotation) {
+      const [x2, y2] = getRotatedOffset(rot, x, y);
+      return !inBounds(x, y) || field[y][x] ||
+             !inBounds(x2, y2) || field[y2][x2];
+    }
+
+    function inBounds(x, y) {
+      return x >= 0 && x < COLS && y >= 0 && y < ROWS;
+    }
+
+    function move(dx, dy) {
+      const x = current.x + dx;
+      const y = current.y + dy;
+      if (!collides(x, y, current.pair)) {
+        current.x = x;
+        current.y = y;
+        drawField();
+      } else if (dy === 1) {
+        fixToField();
+      }
+    }
+
+    function rotate() {
+      const rot = (current.rotation + 1) % 4;
+      const [x2, y2] = getRotatedOffset(rot, current.x, current.y);
+      if (inBounds(x2, y2) && !field[y2][x2]) {
+        current.rotation = rot;
+        drawField();
+      }
+    }
+
+    function hardDrop() {
+      while (!collides(current.x, current.y + 1, current.pair)) {
+        current.y++;
+      }
+      fixToField();
+    }
+
+    function fixToField() {
+      const [c1, c2] = current.pair;
+      const [x1, y1] = [current.x, current.y];
+      const [x2, y2] = getRotatedOffset(current.rotation, x1, y1);
+      field[y1][x1] = c1;
+      field[y2][x2] = c2;
+      current = null;
+      applyGravity();
+    }
+
+    function applyGravity() {
+      let moved;
+      do {
+        moved = false;
+        for (let y = ROWS - 2; y >= 0; y--) {
+          for (let x = 0; x < COLS; x++) {
+            if (field[y][x] && !field[y + 1][x]) {
+              field[y + 1][x] = field[y][x];
+              field[y][x] = null;
+              moved = true;
+            }
+          }
+        }
+      } while (moved);
+
+      setTimeout(checkClear, 200);
+    }
+
+    function checkClear() {
+      const visited = Array.from({ length: ROWS }, () =>
+        Array(COLS).fill(false)
+      );
+      let cleared = false;
+      for (let y = 0; y < ROWS; y++) {
+        for (let x = 0; x < COLS; x++) {
+          const color = field[y][x];
+          if (color && !visited[y][x]) {
+            const group = [];
+            floodFill(x, y, color, visited, group);
+            if (group.length >= 4) {
+              group.forEach(([gx, gy]) => (field[gy][gx] = null));
+              score += 40 * group.length;
+              document.getElementById("score").textContent = `점수: ${score}`;
+              cleared = true;
+            }
+          }
+        }
+      }
+      drawField();
+      if (cleared) {
+        setTimeout(applyGravity, 300);
+      } else {
+        newPuyo();
+      }
+    }
+
+    function floodFill(x, y, color, visited, group) {
+      const stack = [[x, y]];
+      while (stack.length) {
+        const [cx, cy] = stack.pop();
+        if (!inBounds(cx, cy) || visited[cy][cx] || field[cy][cx] !== color) continue;
+        visited[cy][cx] = true;
+        group.push([cx, cy]);
+        stack.push([cx + 1, cy], [cx - 1, cy], [cx, cy + 1], [cx, cy - 1]);
+      }
+    }
+
+    function gameLoop() {
+      if (!gameOver) {
+        if (current) move(0, 1);
+        drawField();
+      }
+    }
+
+    function restart() {
+      createField();
+      score = 0;
+      document.getElementById("score").textContent = "점수: 0";
+      document.getElementById("gameOver").style.display = "none";
+      gameOver = false;
+      newPuyo();
+    }
+
+    document.addEventListener("keydown", e => {
+      if (!current) return;
+      switch (e.key) {
+        case "ArrowLeft": move(-1, 0); break;
+        case "ArrowRight": move(1, 0); break;
+        case "ArrowDown": move(0, 1); break;
+        case "ArrowUp": rotate(); break;
+        case " ": hardDrop(); break;
+      }
+    });
+
+    // 시작
+    restart();
+    setInterval(gameLoop, 500);
+  </script>
+</body>
+</html>
